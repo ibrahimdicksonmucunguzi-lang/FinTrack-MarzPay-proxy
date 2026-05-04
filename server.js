@@ -147,42 +147,35 @@ app.post('/verify-otp', async (req, res) => {
 app.post('/collect', async (req, res) => {
   const { amount, phone_number, country, reference, description } = req.body;
 
-  // Validate amount
   if (!amount || amount < MIN_AMOUNT) {
-    return res.json({
-      status: 'error',
-      message: `Minimum amount is UGX ${MIN_AMOUNT.toLocaleString()}.`,
-    });
+    return res.json({ status: 'error', message: `Minimum amount is UGX ${MIN_AMOUNT.toLocaleString()}.` });
   }
   if (amount > MAX_AMOUNT) {
-    return res.json({
-      status: 'error',
-      message: `Maximum amount is UGX ${MAX_AMOUNT.toLocaleString()}.`,
-    });
+    return res.json({ status: 'error', message: `Maximum amount is UGX ${MAX_AMOUNT.toLocaleString()}.` });
   }
 
-  // Normalize phone: ensure +256XXXXXXXXX format
+  // Normalize phone to +256XXXXXXXXX
   let phone = (phone_number || '').replace(/\s/g, '');
-  if (phone.startsWith('0')) phone = '+256' + phone.substring(1);
-  else if (phone.startsWith('256') && !phone.startsWith('+')) phone = '+' + phone;
-  else if (!phone.startsWith('+')) phone = '+256' + phone;
+  if (phone.startsWith('0'))        phone = '+256' + phone.substring(1);
+  else if (/^256/.test(phone))      phone = '+' + phone;
+  else if (!phone.startsWith('+'))  phone = '+256' + phone;
 
-  // Marz Pay collect-money uses multipart/form-data
-  const FormData = require('form-data');
-  const form = new FormData();
-  form.append('phone_number', phone);
-  form.append('amount', String(amount));
-  form.append('country', country || 'UG');
-  form.append('reference', reference);
-  if (description) form.append('description', description);
+  // Build URL-encoded form body (Marz Pay expects multipart/form-data or form-urlencoded)
+  const params = new URLSearchParams();
+  params.append('phone_number', phone);
+  params.append('amount', String(amount));
+  params.append('country', country || 'UG');
+  params.append('reference', reference);
+  if (description) params.append('description', description);
 
-  console.log('[COLLECT] Sending to Marz Pay — phone:', phone, 'amount:', amount, 'ref:', reference);
+  console.log('[COLLECT] phone:', phone, 'amount:', amount, 'ref:', reference);
 
   try {
-    const r = await axios.post(`${MARZPAY_BASE}/collect-money`, form, {
+    const r = await axios.post(`${MARZPAY_BASE}/collect-money`, params.toString(), {
       headers: {
         'Authorization': `Basic ${MARZPAY_AUTH}`,
-        ...form.getHeaders(),
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
       },
       timeout: 30000,
     });
