@@ -37,30 +37,33 @@ function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-function normalizeEgoPhone(raw) {
-  // Ego SMS requires the number in format 256XXXXXXXXX (no + prefix)
-  let p = (raw || '').replace(/[\s\-\(\)\+]/g, '');
-  if (p.startsWith('0')) return '256' + p.substring(1);       // 0758... → 256758...
-  if (p.startsWith('256')) return p;                           // already correct
-  if (p.length === 9) return '256' + p;                       // bare 9 digits
-  return '256' + p;                                           // fallback
-}
+const MARZ_SMS_BASE = 'https://sms.wearemarz.com/api/v1';
+const MARZ_SMS_KEY = 'sk_YadpDcVa3r1MhEKUDcjwWLA6zWjp1AW3';
+const MARZ_SMS_SECRET = 'NHmg0Pgs262lbE1D8dSa9uoowcpF7fyagOauj0hxjv3LkWOYoxcSnc19un8SZjne';
+// Basic Auth header: base64(key:secret)
+const MARZ_SMS_AUTH = 'Basic ' + Buffer.from(MARZ_SMS_KEY + ':' + MARZ_SMS_SECRET).toString('base64');
 
-async function sendEgoSms(phone, message) {
-  const number = normalizeEgoPhone(phone);
-  // Ego SMS does NOT return HTTP 200 — it returns a numeric ID or "OK" in the body.
-  // Treat any completed request as success (fire-and-forget style).
-  const url = `https://www.egosms.co/api/v1/plain/?number=${number}&message=${encodeURIComponent(message)}&username=INFINITECH&password=${encodeURIComponent('Moses,123##')}&sender=FinTrack`;
-  console.log(`[SMS] Sending to ${number}, url: ${url.substring(0, 80)}...`);
+async function sendMarzSms(phone, message) {
+  // MarzSMS accepts +256XXXXXXXXX format directly
+  console.log(`[SMS] Sending to ${phone} via MarzSMS`);
   try {
-    const r = await axios.get(url, { timeout: 10000 });
-    // Ego SMS success: body is a numeric ID (e.g. "1234567") or contains "OK"
-    // It does NOT use HTTP 200 as a success indicator — just log and move on
-    console.log(`[SMS] Ego response status=${r.status} body="${r.data}"`);
-    return true; // always true — fire and forget
+    const r = await axios.post(
+      `${MARZ_SMS_BASE}/sms/send`,
+      { recipient: phone, message },
+      {
+        headers: {
+          'Authorization': MARZ_SMS_AUTH,
+          'Content-Type': 'application/json',
+        },
+        timeout: 15000,
+      }
+    );
+    const data = r.data;
+    console.log(`[SMS] MarzSMS response: success=${data.success} message="${data.message}" remaining=${data.data?.remaining_balance}`);
+    return data.success === true;
   } catch (e) {
-    console.error('[SMS] Ego request failed:', e.message);
-    return true; // still return true — SMS may have been queued
+    console.error('[SMS] MarzSMS error:', e.response?.data ?? e.message);
+    return false;
   }
 }
 
@@ -100,12 +103,12 @@ app.post('/send-otp', async (req, res) => {
   otpStore[registeredPhone] = { code, expiry: Date.now() + 120000 }; // 2 min
   console.log(`[OTP] Code for ${registeredPhone}: ${code} (expires in 2 min)`);
 
-  // Fire and forget — Ego SMS has no reliable status code
-  sendEgoSms(
+  // Fire and forget — respond immediately, SMS sends in background
+  sendMarzSms(
     registeredPhone,
     `FinTrack code: ${code}. Valid 2 min. Do NOT share.`
   ).then(sent => {
-    console.log(`[OTP] sendEgoSms returned: ${sent}`);
+    console.log(`[OTP] MarzSMS sent to ${registeredPhone}: ${sent}`);
   });
 
   // Respond immediately — don't wait for SMS delivery
