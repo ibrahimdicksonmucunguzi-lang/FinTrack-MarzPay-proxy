@@ -37,10 +37,24 @@ function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+function normalizeEgoPhone(raw) {
+  // Ego SMS requires the number in format 256XXXXXXXXX (no + prefix)
+  let p = (raw || '').replace(/[\s\-\(\)\+]/g, '');
+  if (p.startsWith('0')) return '256' + p.substring(1);       // 0758... → 256758...
+  if (p.startsWith('256')) return p;                           // already correct
+  if (p.length === 9) return '256' + p;                       // bare 9 digits
+  return '256' + p;                                           // fallback
+}
+
 async function sendEgoSms(phone, message) {
-  const number = phone.replace('+', '');
+  const number = normalizeEgoPhone(phone);
+  console.log(`[SMS] Sending to ${number}`);
   const url = `https://www.egosms.co/api/v1/plain/?number=${number}&message=${encodeURIComponent(message)}&username=INFINITECH&password=${encodeURIComponent('Moses,123##')}&sender=FinTrack`;
-  try { await axios.get(url, { timeout: 10000 }); return true; }
+  try {
+    const r = await axios.get(url, { timeout: 10000 });
+    console.log(`[SMS] Ego response: ${r.status} ${r.data}`);
+    return true;
+  }
   catch (e) { console.error('[SMS]', e.message); return false; }
 }
 
@@ -66,22 +80,35 @@ app.post('/verify-phone', async (req, res) => {
 });
 
 app.post('/send-otp', async (req, res) => {
-  const { phone } = req.body;
-  if (!phone) return res.json({ success: false, message: 'phone required' });
+  // `registeredPhone` = the user's account phone (security target)
+  // `phone` = fallback if registeredPhone not provided (legacy)
+  const registeredPhone = req.body.registeredPhone || req.body.phone;
+  if (!registeredPhone) return res.json({ success: false, message: 'registeredPhone required' });
+
   const code = generateOtp();
-  otpStore[phone] = { code, expiry: Date.now() + 600000 };
-  await sendEgoSms(phone, `FinTrack withdrawal OTP: ${code}. Valid 10 min. Do not share.`);
-  console.log(`[OTP] ${phone}: ${code}`);
-  res.json({ success: true, message: 'OTP sent.' });
+  // OTP expires in 2 minutes
+  otpStore[registeredPhone] = { code, expiry: Date.now() + 120000 };
+  console.log(`[OTP] Generated for ${registeredPhone}: ${code} (expires in 2 min)`);
+
+  const sent = await sendEgoSms(
+    registeredPhone,
+    `FinTrack withdrawal code: ${code}. Valid 2 minutes. Do NOT share.`
+  );
+  console.log(`[OTP] SMS dispatched to ${registeredPhone}: ${sent}`);
+  res.json({ success: true, message: 'OTP sent to your registered number.' });
 });
 
 app.post('/verify-otp', async (req, res) => {
-  const { phone, code } = req.body;
-  const entry = otpStore[phone];
+  const { phone, registeredPhone, code } = req.body;
+  const lookupPhone = registeredPhone || phone;
+  const entry = otpStore[lookupPhone];
   if (!entry) return res.json({ success: false, message: 'No OTP found. Request a new one.' });
-  if (Date.now() > entry.expiry) { delete otpStore[phone]; return res.json({ success: false, message: 'OTP expired.' }); }
+  if (Date.now() > entry.expiry) {
+    delete otpStore[lookupPhone];
+    return res.json({ success: false, message: 'OTP expired. Request a new one.' });
+  }
   if (entry.code !== (code || '').trim()) return res.json({ success: false, message: 'Incorrect OTP.' });
-  delete otpStore[phone];
+  delete otpStore[lookupPhone];
   res.json({ success: true, message: 'OTP verified.' });
 });
 
