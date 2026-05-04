@@ -80,10 +80,14 @@ app.post('/verify-phone', async (req, res) => {
 });
 
 app.post('/send-otp', async (req, res) => {
-  // `registeredPhone` = the user's account phone (security target)
-  // `phone` = fallback if registeredPhone not provided (legacy)
-  const registeredPhone = req.body.registeredPhone || req.body.phone;
-  if (!registeredPhone) return res.json({ success: false, message: 'registeredPhone required' });
+  // Accept both field names for compatibility
+  const registeredPhone = req.body.registeredPhone || req.body.phone || '';
+  console.log(`[OTP] /send-otp called, body:`, JSON.stringify(req.body));
+
+  if (!registeredPhone) {
+    console.error('[OTP] No phone field found in body');
+    return res.json({ success: false, message: 'registeredPhone required' });
+  }
 
   const code = generateOtp();
   // OTP expires in 2 minutes
