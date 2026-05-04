@@ -81,7 +81,6 @@ app.post('/verify-phone', async (req, res) => {
     return res.json({ success: false, message: 'phone_number is required' });
   }
 
-  
   // Marz Pay expects format: 256XXXXXXXXX (no +)
   const normalized = phone_number.replace('+', '').replace(/\s/g, '');
 
@@ -146,7 +145,7 @@ app.post('/verify-otp', async (req, res) => {
 
 // ── Collect (deposit / mobile money in) ──────────────────────────────────────
 app.post('/collect', async (req, res) => {
-  const { amount, phone_number } = req.body;
+  const { amount, phone_number, country, reference, description } = req.body;
 
   // Validate amount
   if (!amount || amount < MIN_AMOUNT) {
@@ -162,10 +161,29 @@ app.post('/collect', async (req, res) => {
     });
   }
 
+  // Normalize phone: ensure +256XXXXXXXXX format
+  let phone = (phone_number || '').replace(/\s/g, '');
+  if (phone.startsWith('0')) phone = '+256' + phone.substring(1);
+  else if (phone.startsWith('256') && !phone.startsWith('+')) phone = '+' + phone;
+  else if (!phone.startsWith('+')) phone = '+256' + phone;
+
+  // Marz Pay collect-money uses multipart/form-data
+  const FormData = require('form-data');
+  const form = new FormData();
+  form.append('phone_number', phone);
+  form.append('amount', String(amount));
+  form.append('country', country || 'UG');
+  form.append('reference', reference);
+  if (description) form.append('description', description);
+
+  console.log('[COLLECT] Sending to Marz Pay — phone:', phone, 'amount:', amount, 'ref:', reference);
+
   try {
-    console.log('[COLLECT] Request:', JSON.stringify(req.body));
-    const r = await axios.post(`${MARZPAY_BASE}/collect-money`, req.body, {
-      headers: marzHeaders,
+    const r = await axios.post(`${MARZPAY_BASE}/collect-money`, form, {
+      headers: {
+        'Authorization': `Basic ${MARZPAY_AUTH}`,
+        ...form.getHeaders(),
+      },
       timeout: 30000,
     });
     console.log('[COLLECT] Response:', JSON.stringify(r.data));
@@ -175,40 +193,54 @@ app.post('/collect', async (req, res) => {
     res.json(e.response?.data ?? { status: 'error', message: e.message });
   }
 });
+});
 
 // ── Send money (withdrawal / disbursement) ────────────────────────────────────
-// Requires OTP to have been verified before calling this
 app.post('/send', async (req, res) => {
-  const { amount, phone_number, otp_verified } = req.body;
+  const { amount, phone_number, otp_verified, country, reference, description } = req.body;
 
-  // Must confirm OTP was verified
   if (!otp_verified) {
-    return res.json({
-      status: 'error',
-      message: 'OTP verification required before withdrawal.',
-    });
+    return res.json({ status: 'error', message: 'OTP verification required before withdrawal.' });
   }
-
-  // Validate amount
   if (!amount || amount < MIN_AMOUNT) {
-    return res.json({
-      status: 'error',
-      message: `Minimum withdrawal is UGX ${MIN_AMOUNT.toLocaleString()}.`,
-    });
+    return res.json({ status: 'error', message: `Minimum withdrawal is UGX ${MIN_AMOUNT.toLocaleString()}.` });
   }
   if (amount > MAX_AMOUNT) {
-    return res.json({
-      status: 'error',
-      message: `Maximum withdrawal is UGX ${MAX_AMOUNT.toLocaleString()}.`,
-    });
+    return res.json({ status: 'error', message: `Maximum withdrawal is UGX ${MAX_AMOUNT.toLocaleString()}.` });
   }
 
-  // Remove otp_verified from body before forwarding to Marz Pay
-  const { otp_verified: _, ...marzBody } = req.body;
+  // Normalize phone
+  let phone = (phone_number || '').replace(/\s/g, '');
+  if (phone.startsWith('0')) phone = '+256' + phone.substring(1);
+  else if (phone.startsWith('256') && !phone.startsWith('+')) phone = '+' + phone;
+  else if (!phone.startsWith('+')) phone = '+256' + phone;
+
+  // Marz Pay send-money uses multipart/form-data
+  const FormData = require('form-data');
+  const form = new FormData();
+  form.append('phone_number', phone);
+  form.append('amount', String(amount));
+  form.append('country', country || 'UG');
+  form.append('reference', reference);
+  if (description) form.append('description', description);
+
+  console.log('[SEND] Sending to Marz Pay — phone:', phone, 'amount:', amount);
 
   try {
-    console.log('[SEND] Request:', JSON.stringify(marzBody));
-    const r = await axios.post(`${MARZPAY_BASE}/send-money`, marzBody, {
+    const r = await axios.post(`${MARZPAY_BASE}/send-money`, form, {
+      headers: {
+        'Authorization': `Basic ${MARZPAY_AUTH}`,
+        ...form.getHeaders(),
+      },
+      timeout: 30000,
+    });
+    console.log('[SEND] Response:', JSON.stringify(r.data));
+    res.json(r.data);
+  } catch (e) {
+    console.error('[SEND] Error:', e.message, e.response?.data);
+    res.json(e.response?.data ?? { status: 'error', message: e.message });
+  }
+});
       headers: marzHeaders,
       timeout: 30000,
     });
