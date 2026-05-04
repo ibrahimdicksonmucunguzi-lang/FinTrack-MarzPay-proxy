@@ -152,8 +152,8 @@ app.post('/send', async (req, res) => {
   const { amount, phone_number, otp_verified, country, reference, description } = req.body;
   if (!otp_verified) return res.json({ status: 'error', message: 'OTP verification required.' });
   if (!amount || amount < MIN_AMOUNT) return res.json({ status: 'error', message: `Minimum is UGX ${MIN_AMOUNT}.` });
-  // MarzPay send-money expects phone WITHOUT leading '+' (e.g. 256712345678)
-  const phone = normalizePhone(phone_number).replace('+', '');
+  // MarzPay send-money expects E.164 WITH the '+' prefix (e.g. +256712345678)
+  const phone = normalizePhone(phone_number); // keep the + prefix
   const params = new URLSearchParams();
   params.append('phone_number', phone);
   params.append('amount', String(amount));
