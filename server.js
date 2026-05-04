@@ -88,7 +88,8 @@ app.post('/verify-otp', async (req, res) => {
 app.post('/collect', async (req, res) => {
   const { amount, phone_number, country, reference, description } = req.body;
   if (!amount || amount < MIN_AMOUNT) return res.json({ status: 'error', message: `Minimum is UGX ${MIN_AMOUNT}.` });
-  const phone = normalizePhone(phone_number);
+  // MarzPay collect-money expects phone WITHOUT leading '+' (e.g. 256712345678)
+  const phone = normalizePhone(phone_number).replace('+', '');
   const params = new URLSearchParams();
   params.append('phone_number', phone);
   params.append('amount', String(amount));
@@ -110,7 +111,8 @@ app.post('/send', async (req, res) => {
   const { amount, phone_number, otp_verified, country, reference, description } = req.body;
   if (!otp_verified) return res.json({ status: 'error', message: 'OTP verification required.' });
   if (!amount || amount < MIN_AMOUNT) return res.json({ status: 'error', message: `Minimum is UGX ${MIN_AMOUNT}.` });
-  const phone = normalizePhone(phone_number);
+  // MarzPay send-money expects phone WITHOUT leading '+' (e.g. 256712345678)
+  const phone = normalizePhone(phone_number).replace('+', '');
   const params = new URLSearchParams();
   params.append('phone_number', phone);
   params.append('amount', String(amount));
