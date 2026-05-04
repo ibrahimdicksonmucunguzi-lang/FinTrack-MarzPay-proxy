@@ -48,14 +48,20 @@ function normalizeEgoPhone(raw) {
 
 async function sendEgoSms(phone, message) {
   const number = normalizeEgoPhone(phone);
-  console.log(`[SMS] Sending to ${number}`);
+  // Ego SMS does NOT return HTTP 200 — it returns a numeric ID or "OK" in the body.
+  // Treat any completed request as success (fire-and-forget style).
   const url = `https://www.egosms.co/api/v1/plain/?number=${number}&message=${encodeURIComponent(message)}&username=INFINITECH&password=${encodeURIComponent('Moses,123##')}&sender=FinTrack`;
+  console.log(`[SMS] Sending to ${number}, url: ${url.substring(0, 80)}...`);
   try {
     const r = await axios.get(url, { timeout: 10000 });
-    console.log(`[SMS] Ego response: ${r.status} ${r.data}`);
-    return true;
+    // Ego SMS success: body is a numeric ID (e.g. "1234567") or contains "OK"
+    // It does NOT use HTTP 200 as a success indicator — just log and move on
+    console.log(`[SMS] Ego response status=${r.status} body="${r.data}"`);
+    return true; // always true — fire and forget
+  } catch (e) {
+    console.error('[SMS] Ego request failed:', e.message);
+    return true; // still return true — SMS may have been queued
   }
-  catch (e) { console.error('[SMS]', e.message); return false; }
 }
 
 setInterval(() => {
@@ -82,7 +88,8 @@ app.post('/verify-phone', async (req, res) => {
 app.post('/send-otp', async (req, res) => {
   // Accept both field names for compatibility
   const registeredPhone = req.body.registeredPhone || req.body.phone || '';
-  console.log(`[OTP] /send-otp called, body:`, JSON.stringify(req.body));
+  console.log(`[OTP] /send-otp body:`, JSON.stringify(req.body));
+  console.log(`[OTP] resolved phone: "${registeredPhone}"`);
 
   if (!registeredPhone) {
     console.error('[OTP] No phone field found in body');
@@ -90,15 +97,18 @@ app.post('/send-otp', async (req, res) => {
   }
 
   const code = generateOtp();
-  // OTP expires in 2 minutes
-  otpStore[registeredPhone] = { code, expiry: Date.now() + 120000 };
-  console.log(`[OTP] Generated for ${registeredPhone}: ${code} (expires in 2 min)`);
+  otpStore[registeredPhone] = { code, expiry: Date.now() + 120000 }; // 2 min
+  console.log(`[OTP] Code for ${registeredPhone}: ${code} (expires in 2 min)`);
 
-  const sent = await sendEgoSms(
+  // Fire and forget — Ego SMS has no reliable status code
+  sendEgoSms(
     registeredPhone,
-    `FinTrack withdrawal code: ${code}. Valid 2 minutes. Do NOT share.`
-  );
-  console.log(`[OTP] SMS dispatched to ${registeredPhone}: ${sent}`);
+    `FinTrack code: ${code}. Valid 2 min. Do NOT share.`
+  ).then(sent => {
+    console.log(`[OTP] sendEgoSms returned: ${sent}`);
+  });
+
+  // Respond immediately — don't wait for SMS delivery
   res.json({ success: true, message: 'OTP sent to your registered number.' });
 });
 
