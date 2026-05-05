@@ -89,8 +89,9 @@ app.post('/verify-phone', async (req, res) => {
 });
 
 app.post('/send-otp', async (req, res) => {
-  // Accept both field names for compatibility
   const registeredPhone = req.body.registeredPhone || req.body.phone || '';
+  const amount = req.body.amount || '';          // e.g. "UGX 1,000.00"
+  const destination = req.body.destination || ''; // phone money goes to
   console.log(`[OTP] /send-otp body:`, JSON.stringify(req.body));
   console.log(`[OTP] resolved phone: "${registeredPhone}"`);
 
@@ -103,15 +104,18 @@ app.post('/send-otp', async (req, res) => {
   otpStore[registeredPhone] = { code, expiry: Date.now() + 120000 }; // 2 min
   console.log(`[OTP] Code for ${registeredPhone}: ${code} (expires in 2 min)`);
 
-  // Fire and forget — respond immediately, SMS sends in background
-  sendMarzSms(
-    registeredPhone,
-    `FinTrack code: ${code}. Valid 2 min. Do NOT share.`
-  ).then(sent => {
+  // Build contextual message like MTN/Airtel style
+  let message;
+  if (amount && destination) {
+    message = `Your FinTrack secret code for withdrawal of ${amount} to ${destination} is ${code}. Valid 2 min. Do NOT share.`;
+  } else {
+    message = `Your FinTrack secret code is ${code}. Valid 2 min. Do NOT share.`;
+  }
+
+  sendMarzSms(registeredPhone, message).then(sent => {
     console.log(`[OTP] MarzSMS sent to ${registeredPhone}: ${sent}`);
   });
 
-  // Respond immediately — don't wait for SMS delivery
   res.json({ success: true, message: 'OTP sent to your registered number.' });
 });
 
@@ -132,8 +136,8 @@ app.post('/verify-otp', async (req, res) => {
 app.post('/collect', async (req, res) => {
   const { amount, phone_number, country, reference, description } = req.body;
   if (!amount || amount < MIN_AMOUNT) return res.json({ status: 'error', message: `Minimum is UGX ${MIN_AMOUNT}.` });
-  // MarzPay collect-money expects phone WITHOUT leading '+' (e.g. 256712345678)
-  const phone = normalizePhone(phone_number).replace('+', '');
+  // MarzPay collect-money expects phone WITHOUT '+' (e.g. 256712345678)
+  const phone = normalizePhone(phone_number).replace('+', '')
   const params = new URLSearchParams();
   params.append('phone_number', phone);
   params.append('amount', String(amount));
