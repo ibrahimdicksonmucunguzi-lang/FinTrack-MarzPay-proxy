@@ -136,8 +136,8 @@ app.post('/verify-otp', async (req, res) => {
 app.post('/collect', async (req, res) => {
   const { amount, phone_number, country, reference, description } = req.body;
   if (!amount || amount < MIN_AMOUNT) return res.json({ status: 'error', message: `Minimum is UGX ${MIN_AMOUNT}.` });
-  // MarzPay collect-money expects phone WITHOUT '+' (e.g. 256712345678)
-  const phone = normalizePhone(phone_number).replace('+', '')
+  // MarzPay collect-money expects E.164 WITH '+' prefix (e.g. +256712345678)
+  const phone = normalizePhone(phone_number)
   const params = new URLSearchParams();
   params.append('phone_number', phone);
   params.append('amount', String(amount));
